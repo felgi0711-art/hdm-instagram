@@ -1,0 +1,47 @@
+name: Instagram-Post veröffentlichen
+
+# Läuft, sobald ein freigegebener Post in posts/ landet.
+on:
+  push:
+    branches: [main]
+    paths: ["posts/**/caption.txt"]
+  workflow_dispatch:
+    inputs:
+      folder:
+        description: "Post-Ordner, z. B. posts/2026-11-28-fitness"
+        required: true
+
+permissions:
+  contents: write
+
+concurrency: instagram-publish
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Neue Posts ermitteln
+        id: find
+        run: |
+          if [ -n "${{ inputs.folder }}" ]; then
+            echo "folders=${{ inputs.folder }}" >> "$GITHUB_OUTPUT"
+          else
+            f=$(git diff --name-only HEAD~1 HEAD -- 'posts/*/caption.txt' | xargs -r -n1 dirname | sort -u | tr '\n' ' ')
+            echo "folders=$f" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Auf Instagram posten
+        if: steps.find.outputs.folders != ''
+        env:
+          IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+          IG_USER_ID: "17841413007198086"
+        run: python scripts/publish.py ${{ steps.find.outputs.folders }}
+      - name: Ergebnis speichern
+        if: steps.find.outputs.folders != ''
+        run: |
+          git config user.name "hdm-posting-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add posts/*/published.json 2>/dev/null || true
+          git diff --cached --quiet || (git commit -m "Veröffentlicht: ${{ steps.find.outputs.folders }}" && git push)
